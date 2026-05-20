@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Penjelajah Tata Surya 3D - Kelas 6</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <style>
+        body {
+            background-color: #0f172a; 
+            color: #f8fafc;
+            background-image: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+        }
+
+        .stars-bg {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
+            background: transparent url('data:image/svg+xml;utf8,<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="1.5" fill="white" opacity="0.4"/><circle cx="150" cy="50" r="2" fill="white" opacity="0.6"/><circle cx="80" cy="120" r="1.5" fill="white" opacity="0.3"/><circle cx="180" cy="180" r="2.5" fill="white" opacity="0.5"/></svg>') repeat;
+            animation: twinkle 8s infinite alternate;
+        }
+        @keyframes twinkle { 0% { opacity: 0.8; } 100% { opacity: 0.4; } }
+
+        .page { display: none; animation: fadeIn 0.4s ease-in-out; }
+        .page.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ================= 3D CONTAINER & LAB ================= */
+        #threejs-container {
+            width: 100%; height: 500px; border-radius: 0.75rem;
+            overflow: hidden; position: relative; background-color: #000;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.8);
+            touch-action: none; /* Penting untuk drag & drop manual di HP */
+        }
+
+        #lab-hint {
+            position: absolute; top: 1rem; left: 1rem;
+            background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px);
+            padding: 1.2rem; border-radius: 0.75rem; border: 1px solid #334155;
+            max-width: 360px; z-index: 20; color: #cbd5e1;
+            transition: all 0.3s ease; pointer-events: none;
+        }
+
+        #eclipse-success {
+            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%) scale(0);
+            background: rgba(16, 185, 129, 0.95); color: white; padding: 20px 40px;
+            border-radius: 15px; font-weight: bold; font-size: 1.5rem; text-align: center;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none; border: 2px solid #fff; z-index: 40;
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.6);
+        }
+        #eclipse-success.show { transform: translate(-50%, -50%) scale(1); }
+
+        /* Range Slider Styling (Untuk Kecepatan Revolusi) */
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 26px; width: 26px; border-radius: 50%;
+            background: #3b82f6; cursor: pointer; margin-top: -10px;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.8); border: 2px solid #fff;
+        }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 6px; cursor: pointer; background: #475569; border-radius: 3px; }
+
+        /* ================= INVENTORY UI ================= */
+        #inventory-container {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(10px);
+            padding: 15px 30px; border-radius: 15px; border: 1px solid #334155;
+            display: flex; flex-direction: column; align-items: center; z-index: 30;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 90%; max-width: 500px;
+        }
+
+        .obj-item {
+            width: 70px; height: 70px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.75rem; font-weight: bold; cursor: grab;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.6); transition: transform 0.2s; user-select: none;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8); border: 2px solid transparent;
+        }
+        .obj-item:active { cursor: grabbing; }
+        .obj-item:hover { transform: scale(1.1); border-color: rgba(255,255,255,0.5); }
+        .obj-item.dragging { opacity: 0.5; }
+        
+        .obj-sun { background: radial-gradient(circle, #fde047, #ea580c); color: #fff; box-shadow: 0 0 30px #f59e0b;}
+        .obj-earth { background: radial-gradient(circle, #60a5fa, #1e3a8a); border: 2px solid #3b82f6; color: white; }
+        .obj-moon { background: radial-gradient(circle, #cbd5e1, #475569); border: 2px solid #94a3b8; color: white; }
+
+        /* Quiz Slot (Visual Soal 3) */
+        .quiz-slot {
+            width: 90px; height: 90px; border: 2px dashed #64748b; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.3); cursor: pointer; transition: all 0.2s; position: relative;
+        }
+        .quiz-slot:hover { border-color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+        .quiz-placeholder { font-size: 1.5rem; color: #64748b; font-weight: bold; text-align: center;}
+        .quiz-label { position: absolute; bottom: -25px; font-size: 0.75rem; color: #cbd5e1; font-weight: bold; text-align: center; width: 100%;}
+        
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <!-- Custom Modal for Alerts -->
+    <div id="custom-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-600 shadow-2xl max-w-sm w-full text-center transform transition-all">
+            <i class="fa-solid fa-circle-exclamation text-4xl text-yellow-500 mb-4"></i>
+            <p id="custom-modal-text" class="text-white text-lg mb-6"></p>
+            <button onclick="closeModal()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg transition">Mengerti</button>
+        </div>
+    </div>
+
+    <div class="stars-bg"></div>
+
+    <header class="bg-slate-800/90 backdrop-blur-md border-b border-slate-700 p-4 sticky top-0 z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-4">
+                <button id="back-btn" onclick="goBack()" class="hidden text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded transition">
+                    <i class="fa-solid fa-arrow-left"></i> <span class="hidden md:inline ml-1">Kembali</span>
+                </button>
+                <h1 class="text-xl md:text-2xl font-bold text-blue-400"><i class="fa-solid fa-rocket mr-2"></i> AstroClass</h1>
+            </div>
+            <div id="user-info" class="hidden text-sm md:text-base font-semibold text-slate-300 bg-slate-900 px-4 py-2 rounded-full border border-slate-600">
+                <i class="fa-solid fa-user-astronaut mr-1 text-blue-400"></i> <span id="display-name">Siswa</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto p-4 md:p-6 flex items-center justify-center">
+
+        <!-- ================= PAGE 1: LOGIN ================= -->
+        <section id="page-login" class="page active w-full max-w-md">
+            <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 text-center">
+                <i class="fa-solid fa-earth-americas text-6xl text-blue-500 mb-4 animate-pulse"></i>
+                <h2 class="text-3xl font-bold mb-2">Selamat Datang!</h2>
+                <p class="text-slate-400 mb-6">Siap menjelajahi misteri Tata Surya?</p>
+                <div class="space-y-4">
+                    <div class="text-left">
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Nama Ilmuwan</label>
+                        <input type="text" id="input-name" placeholder="Masukkan namamu..." class="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-600 focus:border-blue-500 outline-none text-white">
+                    </div>
+                    <div class="text-left">
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Kelas</label>
+                        <input type="text" id="input-class" placeholder="Contoh: 6A" class="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-600 focus:border-blue-500 outline-none text-white">
+                    </div>
+                    <button onclick="login()" class="w-full mt-6 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition">
+                        Mulai Eksplorasi <i class="fa-solid fa-space-shuttle ml-2"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= PAGE 2: PENGANTAR VIDEO ================= -->
+        <section id="page-intro" class="page w-full max-w-4xl">
+            <div class="bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden">
+                <div class="p-4 md:p-6 bg-slate-900 border-b border-slate-700">
+                    <h2 class="text-xl md:text-2xl font-bold"><i class="fa-solid fa-video text-red-500 mr-2"></i> Fenomena Alam (Perhatikan Videonya!)</h2>
+                </div>
+                <div class="p-6 flex flex-col md:flex-row gap-8 items-center">
+                    <div class="w-full md:w-1/2 aspect-video bg-black rounded-lg relative overflow-hidden flex items-center justify-center border-2 border-slate-600 shadow-lg">
+                        
+                        <!-- Tag video - Diubah menjadi Video Gerhana Matahari -->
+                        <video class="w-full h-full object-cover z-10 relative" controls autoplay loop muted playsinline>
+                            <!-- Menggunakan video gerhana matahari dari Wikimedia Commons sebagai sumber online yang valid -->
+                            <source src="https://upload.wikimedia.org/wikipedia/commons/transcoded/8/87/Total_Solar_Eclipse_in_Wyoming_-_August_21%2C_2017.webm/Total_Solar_Eclipse_in_Wyoming_-_August_21%2C_2017.webm.480p.vp9.webm" type="video/webm">
+                            <!-- Fallback untuk video lokal jika dijalankan offline di komputer Anda -->
+                            <source src="Video gerhana matahari.mp4" type="video/mp4">
+                            Browser Anda tidak mendukung tag video.
+                        </video>
+                        <div class="absolute top-2 left-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse pointer-events-none z-20"><i class="fa-solid fa-circle text-[8px] align-middle mr-1"></i> REC</div>
+                        <div class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black to-transparent p-4 text-center z-20 pointer-events-none">
+                            <p class="text-sm font-semibold text-white drop-shadow-md">"Pernahkah kamu berpikir, bagaimana peristiwa gerhana itu terjadi?"</p>
+                        </div>
+                    </div>
+                    
+                    <div class="w-full md:w-1/2 space-y-4">
+                        <h3 class="text-xl font-semibold text-blue-400" id="welcome-msg">Halo Ilmuwan!</h3>
+                        <p class="text-slate-300 text-sm leading-relaxed">
+                            Pemandangan di samping pernah kita alami, kadang kala di siang hari tiba-tiba langit menjadi redup.
+                        </p>
+                        <div class="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                            <p class="font-semibold mb-2 text-yellow-400"><i class="fa-solid fa-clipboard-question mr-2"></i> Misi Pencarian Fakta:</p>
+                            <!-- Poin 1,2,3 yang diperbarui -->
+                            <ul class="list-disc list-inside text-sm text-slate-300 space-y-1">
+                                <li>Apa bedanya rotasi dan revolusi?</li>
+                                <li>Apa dampaknya bagi kehidupan di bumi?</li>
+                                <li>Bagaimana fenomena gerhana bisa terjadi?</li>
+                            </ul>
+                        </div>
+                        <button onclick="navTo('page-lab')" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition mt-4">
+                            Selidiki di Lab Virtual <i class="fa-solid fa-flask ml-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= PAGE 3: LAB VIRTUAL 3D (INTERAKTIF BEBAS) ================= -->
+        <section id="page-lab" class="page w-full max-w-6xl">
+            <div class="bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-4 md:p-6">
+                
+                <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
+                    <h2 class="text-2xl font-bold text-blue-400"><i class="fa-solid fa-microscope mr-2"></i> Laboratorium 3D Navigator</h2>
+                    <div class="flex flex-wrap justify-center gap-2">
+                        <button onclick="setMode('rotasi')" id="btn-m-rotasi" class="mode-btn bg-blue-600 text-white px-3 py-1.5 rounded font-semibold text-sm transition">Rotasi</button>
+                        <button onclick="setMode('revolusi')" id="btn-m-revolusi" class="mode-btn bg-slate-700 text-slate-200 px-3 py-1.5 rounded font-semibold text-sm transition">Revolusi</button>
+                        <button onclick="setMode('gerhana_matahari')" id="btn-m-gm" class="mode-btn bg-slate-700 text-slate-200 px-3 py-1.5 rounded font-semibold text-sm transition">Gerhana Matahari</button>
+                        <button onclick="setMode('gerhana_bulan')" id="btn-m-gb" class="mode-btn bg-slate-700 text-slate-200 px-3 py-1.5 rounded font-semibold text-sm transition">Gerhana Bulan</button>
+                    </div>
+                </div>
+
+                <div id="threejs-container" class="border border-slate-600 mb-4" ondragover="onDragOver3D(event)" ondrop="onDrop3D(event)">
+                    
+                    <div id="lab-hint" style="display: none;">
+                        <h4 id="mode-title" class="font-bold text-blue-400 mb-2 border-b border-slate-600 pb-1 text-lg"></h4>
+                        <div id="mode-desc" class="text-sm leading-relaxed text-slate-300"></div>
+                    </div>
+                    
+                    <div id="eclipse-success"></div>
+
+                    <!-- Petunjuk Interaksi 3D Umum -->
+                    <div class="absolute bottom-4 left-4 text-xs text-slate-400 bg-black/50 px-2 py-1 rounded z-10" id="drag-hint">
+                        <i class="fa-solid fa-mouse-pointer mr-1"></i> Arahkan kursor & geser untuk mengubah sudut pandang
+                    </div>
+
+                    <!-- INVENTORY BAWAH UNTUK DRAG BEBAS KE LUAR ANGKASA (Tanpa Kotak UI) -->
+                    <div id="inventory-container">
+                        <h3 class="text-base font-bold text-white mb-1" id="builder-title">Uji Coba: Tarik Objek ke Garis Orbit!</h3>
+                        <p class="text-xs text-slate-300 mb-4 text-center" id="builder-hint-text">
+                            Tarik (Drag) planet di bawah ini <b>langsung ke ruang angkasa</b>.<br>
+                            <span class="text-yellow-400 opacity-80">Setelah dilepas, kamu masih bisa menggeser posisinya di luar angkasa!</span>
+                        </p>
+                        
+                        <div class="flex items-center gap-6" id="inventory">
+                            <div class="obj-item obj-sun" id="obj-sun" draggable="true" ondragstart="onDragStartItem(event, 'sun')" onclick="onSelectClickItem('sun')">Matahari</div>
+                            <div class="obj-item obj-earth" id="obj-earth" draggable="true" ondragstart="onDragStartItem(event, 'earth')" onclick="onSelectClickItem('earth')">Bumi</div>
+                            <div class="obj-item obj-moon" id="obj-moon" draggable="true" ondragstart="onDragStartItem(event, 'moon')" onclick="onSelectClickItem('moon')">Bulan</div>
+                        </div>
+                        
+                        <div class="flex gap-4 mt-4 w-full">
+                            <button onclick="resetBuilder()" class="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm">
+                                <i class="fa-solid fa-rotate-left mr-1"></i> Reset
+                            </button>
+                            <button id="btn-cek-susunan" onclick="checkBuilderCombination()" class="hidden flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg transition shadow-lg text-sm">
+                                <i class="fa-solid fa-check mr-1"></i> Cek Susunan!
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KONTROL BAWAH (Dinamis) -->
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row items-center justify-between gap-4 h-auto md:h-[72px]">
+                    
+                    <!-- INFO ROTASI MANUAL & OTOMATIS -->
+                    <div id="control-manual-rotasi" class="hidden flex-wrap items-center gap-4 w-full md:w-2/3">
+                        <span class="text-sm font-semibold text-yellow-400 whitespace-nowrap">
+                            <i class="fa-solid fa-hand-pointer mr-1"></i> Sentuh/Geser Bola Bumi secara langsung!
+                        </span>
+                        <label class="flex items-center text-sm text-white cursor-pointer bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded border border-slate-600 transition">
+                            <input type="checkbox" id="auto-rotate-cb" checked class="mr-2 cursor-pointer w-4 h-4 accent-blue-500">
+                            Putar Otomatis
+                        </label>
+                    </div>
+
+                    <!-- KONTROL KECEPATAN REVOLUSI -->
+                    <div id="control-speed" class="hidden items-center gap-4 w-full md:w-2/3">
+                        <span class="text-sm font-semibold text-slate-400 whitespace-nowrap"><i class="fa-solid fa-clock mr-1"></i> Kecepatan Revolusi:</span>
+                        <input type="range" id="speed-slider" min="0" max="5" step="0.1" value="1" class="w-full">
+                        <span id="speed-display" class="text-white font-bold w-12 text-center bg-slate-800 rounded px-1 py-1 text-sm border border-slate-600">1.0x</span>
+                    </div>
+                    
+                    <button onclick="navTo('page-dampak')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg transition shadow-lg whitespace-nowrap w-full md:w-auto mt-2 md:mt-0 ml-auto">
+                        Lanjut ke Dampak <i class="fa-solid fa-arrow-right ml-2"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= PAGE 4: DAMPAK PERGERAKAN ================= -->
+        <section id="page-dampak" class="page w-full max-w-4xl">
+            <div class="bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-6 md:p-8">
+                <h2 class="text-3xl font-bold text-blue-400 mb-2 text-center"><i class="fa-solid fa-earth-oceania mr-2"></i> Dampak Pergerakan Bumi</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 mt-6">
+                    <div class="bg-gradient-to-br from-blue-900/40 to-slate-900 rounded-xl p-5 border border-blue-800/50">
+                        <h3 class="font-bold text-xl text-center text-blue-300 border-b border-slate-700 pb-3 mb-4">Akibat Rotasi Bumi</h3>
+                        <ul class="space-y-4">
+                            <li class="flex gap-3 items-start"><div class="bg-blue-600 p-2 rounded-lg text-white"><i class="fa-solid fa-cloud-sun w-5"></i></div><div><h4 class="font-semibold text-white">Siang & Malam</h4><p class="text-xs text-slate-400">Seperti saat kamu memutar bumi tadi. Bagian yang kena cahaya mengalami siang, sisi lainnya malam.</p></div></li>
+                            <li class="flex gap-3 items-start"><div class="bg-blue-600 p-2 rounded-lg text-white"><i class="fa-solid fa-sun w-5"></i></div><div><h4 class="font-semibold text-white">Gerak Semu Harian Matahari</h4><p class="text-xs text-slate-400">Terbit di timur, tenggelam di barat.</p></div></li>
+                            <li class="flex gap-3 items-start"><div class="bg-blue-600 p-2 rounded-lg text-white"><i class="fa-solid fa-clock w-5"></i></div><div><h4 class="font-semibold text-white">Perbedaan Waktu</h4><p class="text-xs text-slate-400">Pembagian zona (WIB, WITA, WIT).</p></div></li>
+                        </ul>
+                    </div>
+                    <div class="bg-gradient-to-br from-yellow-900/30 to-slate-900 rounded-xl p-5 border border-yellow-800/50">
+                        <h3 class="font-bold text-xl text-center text-yellow-300 border-b border-slate-700 pb-3 mb-4">Akibat Revolusi Bumi</h3>
+                        <ul class="space-y-4">
+                            <li class="flex gap-3 items-start"><div class="bg-yellow-600 p-2 rounded-lg text-white"><i class="fa-solid fa-snowflake w-5"></i></div><div><h4 class="font-semibold text-white">Pergantian Musim</h4><p class="text-xs text-slate-400">Panas, gugur, dingin, semi di belahan bumi tertentu.</p></div></li>
+                            <li class="flex gap-3 items-start"><div class="bg-yellow-600 p-2 rounded-lg text-white"><i class="fa-solid fa-calendar-days w-5"></i></div><div><h4 class="font-semibold text-white">Gerak Semu Tahunan Matahari</h4><p class="text-xs text-slate-400">Berpindah utara/selatan khatulistiwa.</p></div></li>
+                            <li class="flex gap-3 items-start"><div class="bg-yellow-600 p-2 rounded-lg text-white"><i class="fa-solid fa-star w-5"></i></div><div><h4 class="font-semibold text-white">Perbedaan Rasi Bintang</h4><p class="text-xs text-slate-400">Bintang terlihat berbeda tiap bulan.</p></div></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="text-center border-t border-slate-700 pt-6">
+                    <button onclick="navTo('page-mission')" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 px-10 rounded-xl shadow-lg text-lg transition">Mulai Misi Evaluasi <i class="fa-solid fa-clipboard-check ml-2"></i></button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= PAGE 5: MISI EVALUASI ================= -->
+        <section id="page-mission" class="page w-full max-w-4xl">
+            <div class="bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-6 md:p-8">
+                <div class="text-center mb-6">
+                    <h2 class="text-3xl font-bold text-purple-400">Misi Evaluasi Akhir</h2>
+                </div>
+
+                <div id="quiz-container" class="space-y-6">
+                    <div class="quiz-item bg-slate-900/50 p-5 rounded-xl border border-slate-700">
+                        <p class="font-semibold text-lg mb-3">1. Definisi yang tepat untuk Rotasi adalah...</p>
+                        <div class="space-y-2">
+                            <label class="flex items-center p-3 border border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition"><input type="radio" name="q1" value="wrong" class="mr-3"> Mengelilingi matahari selama 365 hari.</label>
+                            <label class="flex items-center p-3 border border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition"><input type="radio" name="q1" value="correct" class="mr-3"> Berputar pada porosnya sendiri selama 24 jam.</label>
+                        </div>
+                    </div>
+
+                    <div class="quiz-item bg-slate-900/50 p-5 rounded-xl border border-slate-700">
+                        <p class="font-semibold text-lg mb-1">2. Pilih 3 peristiwa akibat <b>Revolusi Bumi</b>!</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                            <label class="flex items-center p-3 border border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition"><input type="checkbox" class="q2-cb mr-3" value="wrong1"> Terjadinya siang dan malam</label>
+                            <label class="flex items-center p-3 border border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition"><input type="checkbox" class="q2-cb mr-3" value="correct1"> Pergantian musim</label>
+                            <label class="flex items-center p-3 border border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition"><input type="checkbox" class="q2-cb mr-3" value="wrong2"> Perbedaan waktu</label>
+                            <label class="flex items-center p-3 border border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition"><input type="checkbox" class="q2-cb mr-3" value="correct2"> Gerak semu tahunan matahari</label>
+                            <label class="flex items-center p-3 border border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition"><input type="checkbox" class="q2-cb mr-3" value="correct3"> Perbedaan rasi bintang</label>
+                        </div>
+                    </div>
+
+                    <div class="quiz-item bg-slate-900/50 p-5 rounded-xl border border-slate-700">
+                        <p class="font-semibold text-lg mb-2">3. Susunlah posisi benda langit saat terjadi <b>Gerhana Bulan</b>!</p>
+                        <p class="text-xs text-yellow-400 mb-4">*Geser (Drag) gambar objek di bawah dan letakkan ke dalam lintasan posisi 1, 2, atau 3. Amati langsung wujud 3D-nya di tata surya virtual!</p>
+                        
+                        <!-- Mini 3D Canvas Untuk Quiz -->
+                        <div id="quiz-threejs-container" class="w-full h-[250px] bg-black rounded-lg mb-6 border border-slate-600 relative overflow-hidden shadow-inner">
+                            <div class="absolute top-2 left-2 text-xs text-slate-300 bg-black/50 px-2 py-1 rounded z-10"><i class="fa-solid fa-cube mr-1"></i> Ruang Angkasa Virtual</div>
+                        </div>
+
+                        <!-- Panel Inventaris Gambar Objek -->
+                        <div id="quiz-inventory" class="flex justify-center gap-6 mb-6 bg-slate-800/50 p-4 rounded-lg border border-slate-600">
+                            <div class="obj-item obj-sun w-16 h-16 cursor-grab" id="inv-quiz-sun" draggable="true" ondragstart="dragQuizPlanet(event, 'sun')" onclick="selectQuizPlanetClick('sun')">
+                                <i class="fa-solid fa-sun text-2xl drop-shadow-md"></i>
+                            </div>
+                            <div class="obj-item obj-earth w-16 h-16 cursor-grab" id="inv-quiz-earth" draggable="true" ondragstart="dragQuizPlanet(event, 'earth')" onclick="selectQuizPlanetClick('earth')">
+                                <i class="fa-solid fa-earth-americas text-2xl drop-shadow-md"></i>
+                            </div>
+                            <div class="obj-item obj-moon w-16 h-16 cursor-grab" id="inv-quiz-moon" draggable="true" ondragstart="dragQuizPlanet(event, 'moon')" onclick="selectQuizPlanetClick('moon')">
+                                <i class="fa-solid fa-moon text-xl drop-shadow-md"></i>
+                            </div>
+                        </div>
+
+                        <!-- Drop Slots / Lintasan -->
+                        <div class="flex flex-col sm:flex-row items-center gap-4 justify-center bg-slate-800 p-6 rounded-lg">
+                            <div class="quiz-slot" id="q3-drop-1" ondragover="allowDropQuiz(event)" ondrop="dropQuizPlanet(event, 1)" onclick="clickSlotPlacePlanet(1)">
+                                <div class="quiz-label">Posisi 1</div>
+                                <div class="quiz-placeholder">?</div>
+                            </div>
+                            <i class="fa-solid fa-arrow-right text-slate-500 text-2xl hidden sm:block"></i>
+                            <i class="fa-solid fa-arrow-down text-slate-500 text-xl sm:hidden"></i>
+                            <div class="quiz-slot" id="q3-drop-2" ondragover="allowDropQuiz(event)" ondrop="dropQuizPlanet(event, 2)" onclick="clickSlotPlacePlanet(2)">
+                                <div class="quiz-label">Posisi 2</div>
+                                <div class="quiz-placeholder">?</div>
+                            </div>
+                            <i class="fa-solid fa-arrow-right text-slate-500 text-2xl hidden sm:block"></i>
+                            <i class="fa-solid fa-arrow-down text-slate-500 text-xl sm:hidden"></i>
+                            <div class="quiz-slot" id="q3-drop-3" ondragover="allowDropQuiz(event)" ondrop="dropQuizPlanet(event, 3)" onclick="clickSlotPlacePlanet(3)">
+                                <div class="quiz-label">Posisi 3</div>
+                                <div class="quiz-placeholder">?</div>
+                            </div>
+                        </div>
+
+                        <div class="text-center mt-4">
+                            <button onclick="resetQuizSlots()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-white transition"><i class="fa-solid fa-rotate-left mr-1"></i> Kosongkan Lintasan</button>
+                        </div>
+                    </div>
+
+                    <button onclick="cekMisi()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg text-lg transition">Kirim Laporan Penelitian</button>
+                </div>
+
+                <div id="result-area" class="hidden text-center py-8">
+                    <i class="fa-solid fa-award text-7xl text-yellow-400 mb-4 animate-bounce"></i>
+                    <h2 class="text-3xl font-bold text-white mb-2">Misi Selesai!</h2>
+                    <p class="text-lg text-slate-300 mb-4">Skor Penelitianmu: <span id="final-score" class="text-4xl font-bold text-emerald-400">100</span>/100</p>
+                    <div id="feedback-msg" class="bg-slate-900 p-5 rounded-xl border border-slate-700 mb-6 text-sm text-left leading-relaxed"></div>
+                    
+                    <div class="flex flex-col sm:flex-row justify-center gap-4">
+                        <button onclick="resetMisi()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded-lg shadow transition">
+                            <i class="fa-solid fa-rotate-left mr-2"></i> Ulangi Misi
+                        </button>
+                        <button onclick="navTo('page-lab')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg shadow transition">
+                            Kembali ke Lab
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        /* ================= MODAL & NAVIGASI ================= */
+        function showModal(msg) {
+            document.getElementById('custom-modal-text').innerHTML = msg.replace(/\n/g, '<br>');
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('custom-modal').classList.add('hidden');
+        }
+
+        let student = { name: '', kelas: '' };
+        let pageHistory = ['page-login'];
+
+        function navTo(pageId, isBackAction = false) {
+            const current = document.querySelector('.page.active').id;
+            if(!isBackAction && current !== pageId) pageHistory.push(current);
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+            window.scrollTo(0,0);
+            
+            const btn = document.getElementById('back-btn');
+            if(pageId === 'page-login') { btn.classList.add('hidden'); pageHistory = ['page-login']; } 
+            else btn.classList.remove('hidden');
+            
+            if(pageId === 'page-lab') setTimeout(initThreeJS, 100);
+            if(pageId === 'page-mission') setTimeout(initQuizThreeJS, 100); // Initialize 3D for Quiz
+        }
+
+        function goBack() { if(pageHistory.length > 0) navTo(pageHistory.pop(), true); }
+        function login() {
+            const n = document.getElementById('input-name').value.trim();
+            if(!n) return showModal('Tolong isi namamu terlebih dahulu!');
+            student.name = n; document.getElementById('display-name').innerText = n;
+            document.getElementById('user-info').classList.remove('hidden');
+            navTo('page-intro');
+        }
+
+        /* ================= THREE.JS TEXTURE GENERATORS (SHARED) ================= */
+        function createSunTexture() { const c=document.createElement('canvas'); c.width=256; c.height=128; const ctx=c.getContext('2d'); const g=ctx.createLinearGradient(0,0,256,128); g.addColorStop(0,'#fef08a'); g.addColorStop(0.5,'#f59e0b'); g.addColorStop(1,'#c2410c'); ctx.fillStyle=g; ctx.fillRect(0,0,256,128); return new THREE.CanvasTexture(c); }
+        function createEarthTexture() { const c=document.createElement('canvas'); c.width=512; c.height=256; const ctx=c.getContext('2d'); ctx.fillStyle='#0f4a8a'; ctx.fillRect(0,0,512,256); ctx.fillStyle='#22c55e'; for(let i=0;i<60;i++){ctx.beginPath();ctx.arc(Math.random()*512,Math.random()*256,Math.random()*20+5,0,Math.PI*2);ctx.fill();} ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,512,15); ctx.fillRect(0,241,512,15); return new THREE.CanvasTexture(c); }
+        function createMoonTexture() { const c=document.createElement('canvas'); c.width=256; c.height=128; const ctx=c.getContext('2d'); ctx.fillStyle='#94a3b8'; ctx.fillRect(0,0,256,128); ctx.fillStyle='#475569'; for(let i=0;i<40;i++){ctx.beginPath();ctx.arc(Math.random()*256,Math.random()*128,Math.random()*6+1,0,Math.PI*2);ctx.fill();} return new THREE.CanvasTexture(c); }
+
+        /* ================= THREE.JS 3D ENGINE (LAB UTAMA) ================= */
+        let scene, camera, renderer, controls, dirLight;
+        let sunMesh, earthSystem, earthMesh, moonSystem, moonMesh, orbitLine;
+        let puzzleSun, puzzleEarth, puzzleMoon, dropPlane; 
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        
+        let is3DInitialized = false;
+        let isSimulating = false; 
+        let currentMode = 'rotasi'; let time = 0; let simSpeed = 1;
+        let isDraggingEarth = false; let isDragging3DObj = false; let dragged3DObj = null; let offset = new THREE.Vector3(); let previousMouseX = 0; let draggedObjId = null; 
+
+        const modeInfo = {
+            'rotasi': { title: "⚙️ Pengamatan Rotasi Bumi", desc: "Bumi berputar pada porosnya sendiri selama <b>24 Jam</b>.<br><br><b class='text-yellow-400'>Investigasi Siang & Malam:</b><br>Amati batas Siang dan Malam. Bumi kini <b>berputar otomatis</b>, namun kamu tetap bisa menyentuh/menggesernya secara manual! Gunakan tombol di bawah untuk mematikan putaran otomatis." },
+            'revolusi': { title: "🔄 Mode Revolusi", desc: "Bumi mengelilingi Matahari selama <b>365 Hari</b> dan Bulan mengelilingi Bumi selama <b>29,5 Hari</b>.<br><br>Gunakan slider kecepatan di bawah untuk mengatur cepat lambatnya waktu revolusi." },
+            'gerhana_matahari': { title: "🌞 Gerhana Matahari", desc: "Luar Biasa! Susunan Matahari - Bulan - Bumi yang sejajar mengakibatkan cahaya Matahari ke Bumi terhalang oleh Bulan. Terjadilah <b>Gerhana Matahari</b> di siang hari." },
+            'gerhana_bulan': { title: "🌑 Gerhana Bulan", desc: "Hebat! Susunan Matahari - Bumi - Bulan yang sejajar mengakibatkan cahaya Matahari ke Bulan terhalang oleh Bumi, sehingga Bulan masuk ke bayangan gelap Bumi dan terjadilah <b>Gerhana Bulan</b>." }
+        };
+
+        function initThreeJS() {
+            if(is3DInitialized) return;
+            const container = document.getElementById('threejs-container');
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.05)); 
+            dirLight = new THREE.DirectionalLight(0xffffff, 2.5); dirLight.castShadow = true; 
+            dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 5; dirLight.shadow.camera.far = 150;
+            dirLight.shadow.camera.left = -40; dirLight.shadow.camera.right = 40; dirLight.shadow.camera.top = 40; dirLight.shadow.camera.bottom = -40;
+            scene.add(dirLight);
+
+            const starGeo = new THREE.BufferGeometry(); const starPos = new Float32Array(2000*3);
+            for(let i=0; i<6000; i++) starPos[i] = (Math.random()-0.5)*800;
+            starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+            scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({color: 0xffffff, size: 1})));
+
+            sunMesh = new THREE.Mesh(new THREE.SphereGeometry(15,32,32), new THREE.MeshBasicMaterial({map: createSunTexture()})); scene.add(sunMesh);
+            sunMesh.add(new THREE.Mesh(new THREE.SphereGeometry(17,32,32), new THREE.MeshBasicMaterial({color: 0xf59e0b, transparent:true, opacity:0.3, blending: THREE.AdditiveBlending})));
+            dirLight.position.set(0,0,0);
+
+            earthSystem = new THREE.Group(); scene.add(earthSystem);
+            orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(new THREE.EllipseCurve(0,0,50,50,0,2*Math.PI,false,0).getPoints(100)), new THREE.LineBasicMaterial({color:0xffffff, transparent:true, opacity:0.4})).rotateX(Math.PI/2);
+            scene.add(orbitLine); 
+            
+            earthMesh = new THREE.Mesh(new THREE.SphereGeometry(5,32,32), new THREE.MeshPhongMaterial({map: createEarthTexture(), shininess: 5}));
+            earthMesh.position.set(50,0,0); earthMesh.castShadow = true; earthMesh.receiveShadow = true;
+            earthSystem.add(earthMesh); dirLight.target = earthMesh;
+
+            moonSystem = new THREE.Group(); moonSystem.position.set(50,0,0); earthSystem.add(moonSystem);
+            moonSystem.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(new THREE.EllipseCurve(0,0,12,12,0,2*Math.PI,false,0).getPoints(60)), new THREE.LineBasicMaterial({color:0xaaaaaa, transparent:true, opacity:0.6})).rotateX(Math.PI/2));
+            moonMesh = new THREE.Mesh(new THREE.SphereGeometry(1.5,32,32), new THREE.MeshPhongMaterial({map: createMoonTexture()}));
+            moonMesh.position.set(12,0,0); moonMesh.castShadow = true; moonMesh.receiveShadow = true;
+            moonSystem.add(moonMesh);
+
+            dropPlane = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshBasicMaterial({visible: false}));
+            dropPlane.rotation.x = -Math.PI / 2; scene.add(dropPlane);
+
+            puzzleSun = new THREE.Mesh(new THREE.SphereGeometry(15,32,32), new THREE.MeshBasicMaterial({map: createSunTexture()})); scene.add(puzzleSun); puzzleSun.visible = false;
+            puzzleEarth = new THREE.Mesh(new THREE.SphereGeometry(8,32,32), new THREE.MeshPhongMaterial({map: createEarthTexture()})); scene.add(puzzleEarth); puzzleEarth.visible = false;
+            puzzleMoon = new THREE.Mesh(new THREE.SphereGeometry(4,32,32), new THREE.MeshPhongMaterial({map: createMoonTexture()})); scene.add(puzzleMoon); puzzleMoon.visible = false;
+
+            container.addEventListener('pointerdown', onPointerDown); container.addEventListener('pointermove', onPointerMove); window.addEventListener('pointerup', onPointerUp);
+
+            is3DInitialized = true; setMode('rotasi'); animate3D();
+        }
+
+        // Use global THREE.OrbitControls instead of destructured if not modular
+        const OrbitControls = THREE.OrbitControls;
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+            if(isSimulating) {
+                sunMesh.rotation.y += 0.002;
+                if(currentMode === 'rotasi') {
+                    earthSystem.rotation.y = 0; moonSystem.rotation.y = 0;
+                    const ep = new THREE.Vector3(); earthMesh.getWorldPosition(ep);
+                    controls.target.lerp(ep, 0.05); 
+                    
+                    const autoRotateCb = document.getElementById('auto-rotate-cb');
+                    if (autoRotateCb && autoRotateCb.checked && !isDraggingEarth) earthMesh.rotation.y += 0.005;
+                } else if(currentMode === 'revolusi') {
+                    time += 0.005 * simSpeed; earthMesh.rotation.y += 0.02 * simSpeed;
+                    earthSystem.rotation.y = time; moonSystem.rotation.y = time * 4; 
+                    controls.target.lerp(new THREE.Vector3(0,0,0), 0.05);
+                } else {
+                    earthMesh.rotation.y += 0.005; 
+                }
+            } else {
+                puzzleSun.rotation.y += 0.005; puzzleEarth.rotation.y += 0.005; puzzleMoon.rotation.y += 0.005;
+            }
+            controls.update(); renderer.render(scene, camera);
+        }
+
+        function onPointerDown(event) {
+            const container = document.getElementById('threejs-container'); const rect = container.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            if (!isSimulating) {
+                const objects = [puzzleSun, puzzleEarth, puzzleMoon].filter(o => o.visible);
+                const intersects = raycaster.intersectObjects(objects);
+                if (intersects.length > 0) {
+                    controls.enabled = false; isDragging3DObj = true; dragged3DObj = intersects[0].object;
+                    const intersectPlane = raycaster.intersectObject(dropPlane);
+                    if(intersectPlane.length > 0) offset.copy(intersectPlane[0].point).sub(dragged3DObj.position);
+                }
+            } else if (isSimulating && currentMode === 'rotasi') {
+                const intersects = raycaster.intersectObject(earthMesh);
+                if (intersects.length > 0) {
+                    isDraggingEarth = true; controls.enabled = false; previousMouseX = event.clientX;
+                }
+            }
+        }
+
+        function onPointerMove(event) {
+            if(isDragging3DObj || isDraggingEarth) {
+                const container = document.getElementById('threejs-container'); const rect = container.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            if (isDragging3DObj && dragged3DObj) {
+                raycaster.setFromCamera(mouse, camera); const intersects = raycaster.intersectObject(dropPlane);
+                if (intersects.length > 0) { dragged3DObj.position.copy(intersects[0].point.sub(offset)); dragged3DObj.position.y = 0; }
+            } else if (isDraggingEarth && isSimulating && currentMode === 'rotasi') {
+                const deltaX = event.clientX - previousMouseX; earthMesh.rotation.y += deltaX * 0.015; previousMouseX = event.clientX;
+            }
+        }
+
+        function onPointerUp(event) {
+            if (isDragging3DObj) { isDragging3DObj = false; dragged3DObj = null; controls.enabled = true; }
+            if (isDraggingEarth) { isDraggingEarth = false; controls.enabled = true; }
+        }
+
+        function onDragStartItem(event, id) { draggedObjId = id; event.dataTransfer.setData('text/plain', id); }
+        function onDragOver3D(event) { event.preventDefault(); }
+        function onDrop3D(event) {
+            event.preventDefault(); if(!draggedObjId) return;
+            const container = document.getElementById('threejs-container'); const rect = container.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera); const intersects = raycaster.intersectObject(dropPlane);
+            
+            if(intersects.length > 0) placeObjAt(draggedObjId, intersects[0].point);
+            else placeObjAt(draggedObjId, new THREE.Vector3(0,0,0)); 
+            draggedObjId = null;
+        }
+
+        function onSelectClickItem(id) {
+            const spawnPoints = { 'sun': new THREE.Vector3(0, 0, 0), 'earth': new THREE.Vector3(30, 0, 20), 'moon': new THREE.Vector3(-30, 0, 20) };
+            placeObjAt(id, spawnPoints[id]);
+        }
+
+        function placeObjAt(itemId, point) {
+            document.getElementById(`obj-${itemId}`).style.display = 'none';
+            let mesh;
+            if (itemId === 'sun') mesh = puzzleSun; if (itemId === 'earth') mesh = puzzleEarth; if (itemId === 'moon') mesh = puzzleMoon;
+            
+            mesh.position.copy(point); mesh.position.y = 0; mesh.visible = true;
+            if (puzzleSun.visible && puzzleEarth.visible && puzzleMoon.visible) document.getElementById('btn-cek-susunan').classList.remove('hidden');
+        }
+
+        function setMode(mode) {
+            currentMode = mode; isSimulating = false;
+            document.querySelectorAll('.mode-btn').forEach(btn => { btn.classList.remove('bg-blue-600', 'bg-yellow-600', 'bg-purple-600', 'text-white'); btn.classList.add('bg-slate-700', 'text-slate-200'); });
+            const btn = document.getElementById('btn-m-' + (mode==='rotasi'?'rotasi':mode==='revolusi'?'revolusi':mode==='gerhana_matahari'?'gm':'gb'));
+            if(mode==='rotasi'||mode==='revolusi') btn.classList.replace('bg-slate-700','bg-blue-600');
+            else if(mode==='gerhana_matahari') btn.classList.replace('bg-slate-700','bg-yellow-600');
+            else btn.classList.replace('bg-slate-700','bg-purple-600');
+            btn.classList.add('text-white');
+
+            resetBuilder();
+            document.getElementById('inventory-container').style.display = 'flex';
+            document.getElementById('lab-hint').style.display = 'none';
+            document.getElementById('eclipse-success').classList.remove('show');
+            document.getElementById('control-speed').classList.replace('flex', 'hidden');
+            document.getElementById('control-manual-rotasi').classList.replace('flex', 'hidden');
+            
+            if(mode === 'rotasi' || mode === 'revolusi') document.getElementById('builder-title').innerText = "Tarik Objek Langsung ke Luar Angkasa!";
+            else document.getElementById('builder-title').innerText = mode === 'gerhana_matahari' ? "Susun Posisi Gerhana Matahari!" : "Susun Posisi Gerhana Bulan!";
+            
+            orbitLine.visible = true; camera.position.set(0, 100, 70); controls.target.set(0,0,0);
+        }
+
+        document.getElementById('speed-slider').addEventListener('input', e => {
+            simSpeed = parseFloat(e.target.value); document.getElementById('speed-display').innerText = simSpeed.toFixed(1) + 'x';
+        });
+
+        function resetBuilder() {
+            ['sun','earth','moon'].forEach(id => { document.getElementById('obj-'+id).style.display = 'flex'; });
+            if(puzzleSun) { puzzleSun.visible=false; puzzleEarth.visible=false; puzzleMoon.visible=false; }
+            if(earthMesh) { earthMesh.visible=false; moonMesh.visible=false; sunMesh.visible=false; }
+            document.getElementById('btn-cek-susunan').classList.add('hidden');
+            isSimulating = false; draggedObjId = null;
+            document.getElementById('inventory-container').style.display = 'flex';
+            document.getElementById('builder-hint-text').innerText = "Tarik (Drag) atau Klik planet di bawah ke ruang angkasa!";
+        }
+
+        function checkBuilderCombination() {
+            const dSE = puzzleSun.position.distanceTo(puzzleEarth.position);
+            const dSM = puzzleSun.position.distanceTo(puzzleMoon.position);
+            const dEM = puzzleEarth.position.distanceTo(puzzleMoon.position);
+
+            if (currentMode === 'rotasi' || currentMode === 'revolusi') {
+                const dSunOrigin = puzzleSun.position.length();
+                if (dSunOrigin < 30 && Math.abs(dSE - 50) < 25 && dEM < 25) triggerRealSimulation();
+                else showModal('Susunan kurang tepat!\n- Matahari harus di tengah (pusat orbit)\n- Bumi diletakkan di garis orbit\n- Bulan berada di dekat Bumi');
+            } else {
+                const isMoonMiddle = Math.abs(dSM + dEM - dSE) < 15;
+                const isEarthMiddle = Math.abs(dSE + dEM - dSM) < 15;
+
+                if (currentMode === 'gerhana_matahari' && isMoonMiddle) triggerRealSimulation(Math.PI); 
+                else if (currentMode === 'gerhana_bulan' && isEarthMiddle) triggerRealSimulation(0); 
+                else showModal('Wah, susunannya keliru!\nIngat, benda apa yang berada di tengah untuk menghalangi cahaya matahari? Pastikan posisinya membentuk garis lurus yang sejajar!');
+            }
+        }
+
+        function triggerRealSimulation(moonAngle = 0) {
+            isSimulating = true;
+            puzzleSun.visible = false; puzzleEarth.visible = false; puzzleMoon.visible = false;
+            document.getElementById('inventory-container').style.display = 'none';
+            document.getElementById('btn-cek-susunan').classList.add('hidden');
+            
+            earthMesh.visible = true; moonMesh.visible = true; sunMesh.visible = true; orbitLine.visible = true;
+            
+            document.getElementById('lab-hint').style.display = 'block';
+            document.getElementById('mode-title').innerHTML = modeInfo[currentMode].title; 
+            document.getElementById('mode-desc').innerHTML = modeInfo[currentMode].desc;
+            
+            if(currentMode === 'rotasi') {
+                document.getElementById('control-manual-rotasi').classList.replace('hidden', 'flex');
+                const autoRotateCb = document.getElementById('auto-rotate-cb'); if(autoRotateCb) autoRotateCb.checked = true;
+                const ep = new THREE.Vector3(); earthMesh.getWorldPosition(ep);
+                camera.position.set(ep.x + 10, ep.y + 2, ep.z + 14); controls.target.set(ep.x, ep.y, ep.z);
+            } else if (currentMode === 'revolusi') {
+                document.getElementById('control-speed').classList.replace('hidden', 'flex');
+                document.getElementById('speed-slider').value = simSpeed; document.getElementById('speed-display').innerText = simSpeed.toFixed(1) + 'x';
+                camera.position.set(0, 60, 90); controls.target.set(0,0,0);
+            } else {
+                const notif = document.getElementById('eclipse-success');
+                notif.innerHTML = `<i class="fa-solid fa-check-circle mb-2 text-4xl"></i><br><span class="text-2xl">Posisi Sempurna!</span>`;
+                notif.classList.add('show');
+                camera.position.set(25, 40, 80); controls.target.set(0,0,0);
+                earthSystem.rotation.y = 0; moonSystem.rotation.y = moonAngle; 
+            }
+        }
+
+        /* ================= QUIZ: MINI 3D ENGINE (EVALUASI) & DRAG DROP UI ================= */
+        let quizScene, quizCamera, quizRenderer;
+        let quizSunMesh, quizEarthMesh, quizMoonMesh;
+        let isQuiz3DInitialized = false;
+
+        function initQuizThreeJS() {
+            if(isQuiz3DInitialized) return;
+            const container = document.getElementById('quiz-threejs-container');
+            if(!container) return;
+
+            quizScene = new THREE.Scene();
+            quizCamera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+            quizCamera.position.set(0, 15, 60);
+            quizCamera.lookAt(0,0,0);
+
+            quizRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            quizRenderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(quizRenderer.domElement);
+
+            quizScene.add(new THREE.AmbientLight(0xffffff, 0.5)); 
+            const dirL = new THREE.DirectionalLight(0xffffff, 2);
+            dirL.position.set(0, 10, 20);
+            quizScene.add(dirL);
+
+            const starGeo = new THREE.BufferGeometry(); const starPos = new Float32Array(500*3);
+            for(let i=0; i<1500; i++) starPos[i] = (Math.random()-0.5)*300;
+            starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+            quizScene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({color: 0xffffff, size: 1})));
+
+            quizSunMesh = new THREE.Mesh(new THREE.SphereGeometry(10,32,32), new THREE.MeshBasicMaterial({map: createSunTexture()}));
+            quizEarthMesh = new THREE.Mesh(new THREE.SphereGeometry(6,32,32), new THREE.MeshPhongMaterial({map: createEarthTexture(), shininess: 5}));
+            quizMoonMesh = new THREE.Mesh(new THREE.SphereGeometry(3,32,32), new THREE.MeshPhongMaterial({map: createMoonTexture()}));
+            
+            quizScene.add(quizSunMesh); quizScene.add(quizEarthMesh); quizScene.add(quizMoonMesh);
+            
+            quizSunMesh.visible = false; quizEarthMesh.visible = false; quizMoonMesh.visible = false;
+
+            window.addEventListener('resize', () => {
+                if(container && quizRenderer) {
+                    quizCamera.aspect = container.clientWidth / container.clientHeight;
+                    quizCamera.updateProjectionMatrix();
+                    quizRenderer.setSize(container.clientWidth, container.clientHeight);
+                }
+            });
+
+            isQuiz3DInitialized = true;
+            animateQuiz3D();
+        }
+
+        function animateQuiz3D() {
+            requestAnimationFrame(animateQuiz3D);
+            if(quizSunMesh.visible) quizSunMesh.rotation.y += 0.005;
+            if(quizEarthMesh.visible) quizEarthMesh.rotation.y += 0.01;
+            if(quizMoonMesh.visible) quizMoonMesh.rotation.y += 0.01;
+            quizRenderer.render(quizScene, quizCamera);
+        }
+
+        function updateQuiz3DScene() {
+            if(!isQuiz3DInitialized) return;
+            
+            quizSunMesh.visible = false; quizEarthMesh.visible = false; quizMoonMesh.visible = false;
+
+            const positions = [-22, 0, 22];
+            
+            for(let i=1; i<=3; i++) {
+                const pId = quizAnswers[i];
+                let mesh = null;
+                
+                if(pId === 'sun') mesh = quizSunMesh;
+                else if(pId === 'earth') mesh = quizEarthMesh;
+                else if(pId === 'moon') mesh = quizMoonMesh;
+
+                if(mesh) {
+                    mesh.position.set(positions[i-1], 0, 0);
+                    mesh.visible = true;
+                }
+            }
+        }
+
+        /* ================= DRAG & DROP LOGIC UNTUK EVALUASI ================= */
+        let quizAnswers = { 1: 'none', 2: 'none', 3: 'none' }; 
+        let selectedQuizPlanet = null; // Menyimpan planet yang diklik (Untuk HP/Layar Sentuh)
+
+        function dragQuizPlanet(ev, planet) {
+            ev.dataTransfer.setData("planet", planet);
+        }
+
+        function allowDropQuiz(ev) {
+            ev.preventDefault();
+        }
+
+        function dropQuizPlanet(ev, slotId) {
+            ev.preventDefault();
+            const planet = ev.dataTransfer.getData("planet");
+            if(planet === 'sun' || planet === 'earth' || planet === 'moon') {
+                quizAnswers[slotId] = planet;
+                renderQuizSlots();
+                updateQuiz3DScene();
+            }
+        }
+
+        // --- Fitur Alternatif Klik Ganda (Sentuh Planet, Lalu Sentuh Kotak) untuk Layar HP ---
+        function selectQuizPlanetClick(planet) {
+            selectedQuizPlanet = planet;
+            // Memberikan efek visual bahwa objek sedang dipilih
+            document.querySelectorAll('#quiz-inventory .obj-item').forEach(el => {
+                el.classList.remove('border-white', 'scale-110');
+            });
+            document.getElementById('inv-quiz-' + planet).classList.add('border-white', 'scale-110');
+        }
+
+        function clickSlotPlacePlanet(slotId) {
+            if(selectedQuizPlanet) {
+                quizAnswers[slotId] = selectedQuizPlanet;
+                renderQuizSlots();
+                updateQuiz3DScene();
+                // Reset seleksi klik setelah diletakkan (opsional)
+                // selectedQuizPlanet = null; 
+                // document.querySelectorAll('#quiz-inventory .obj-item').forEach(el => el.classList.remove('border-white', 'scale-110'));
+            }
+        }
+        // -------------------------------------------------------------------------------------
+
+        function resetQuizSlots() {
+            quizAnswers = { 1: 'none', 2: 'none', 3: 'none' };
+            renderQuizSlots();
+            updateQuiz3DScene();
+        }
+
+        function renderQuizSlots() {
+            for(let i=1; i<=3; i++) {
+                const p = quizAnswers[i];
+                const slotEl = document.getElementById('q3-drop-' + i);
+                
+                slotEl.innerHTML = `<div class="quiz-label">Posisi ${i}</div>`;
+                if(p === 'none') {
+                    slotEl.innerHTML += `<div class="quiz-placeholder">?</div>`;
+                    slotEl.className = 'quiz-slot';
+                } else {
+                    // Ikon untuk diletakkan di dalam lintasan drop
+                    let icon = '';
+                    if(p === 'sun') icon = '<i class="fa-solid fa-sun text-xl"></i>';
+                    if(p === 'earth') icon = '<i class="fa-solid fa-earth-americas text-xl"></i>';
+                    if(p === 'moon') icon = '<i class="fa-solid fa-moon text-lg"></i>';
+
+                    slotEl.innerHTML += `<div class="obj-item obj-${p} absolute scale-[0.8] shadow-none pointer-events-none">${icon}</div>`;
+                    slotEl.className = 'quiz-slot border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)] bg-slate-900/50'; 
+                }
+            }
+        }
+
+        /* ================= SUBMIT MISI EVALUASI ================= */
+        function resetMisi() {
+            const q1 = document.querySelector('input[name="q1"]:checked'); if(q1) q1.checked = false;
+            const q2 = document.querySelectorAll('.q2-cb:checked'); q2.forEach(cb => cb.checked = false);
+
+            resetQuizSlots(); // Ini otomatis akan membersihkan object 3D-nya juga
+
+            document.getElementById('result-area').classList.add('hidden'); document.getElementById('result-area').classList.remove('block');
+            document.getElementById('quiz-container').classList.remove('hidden'); window.scrollTo(0,0);
+        }
+
+        function cekMisi() {
+            let score = 0; let feedback = [];
+            const q1 = document.querySelector('input[name="q1"]:checked');
+            if(!q1) return showModal('Silakan jawab pertanyaan nomor 1 terlebih dahulu!');
+            if(q1.value === 'correct') score += 30; else feedback.push("<b>No 1:</b> Rotasi adalah putaran benda langit pada porosnya sendiri.");
+
+            const q2 = document.querySelectorAll('.q2-cb:checked');
+            if(q2.length !== 3) return showModal('Pilih tepat 3 jawaban untuk nomor 2!');
+            let hW = false; q2.forEach(cb => { if(cb.value.includes('correct')) score+=10; if(cb.value.includes('wrong')) hW=true; });
+            if(hW) feedback.push("<b>No 2:</b> Revolusi menyebabkan Pergantian Musim, Gerak Semu Tahunan Matahari, dan Perbedaan Rasi Bintang.");
+
+            const p1 = quizAnswers[1]; const p2 = quizAnswers[2]; const p3 = quizAnswers[3];
+            if(p1 === 'none' || p2 === 'none' || p3 === 'none') return showModal('Tolong lengkapi susunan planet pada soal nomor 3!');
+            
+            // Logika Gerhana Bulan: Bumi di tengah (Matahari -> Bumi -> Bulan) atau sebaliknya
+            if((p1==='sun' && p2==='earth' && p3==='moon') || (p1==='moon' && p2==='earth' && p3==='sun')) {
+                score += 40; 
+            } else {
+                feedback.push("<b>No 3:</b> Gerhana Bulan terjadi ketika posisi <b>Bumi berada di tengah</b>, tepat di antara Matahari dan Bulan dalam satu garis lurus.");
+            }
+
+            document.getElementById('quiz-container').classList.add('hidden');
+            document.getElementById('result-area').classList.remove('hidden'); document.getElementById('result-area').classList.add('block');
+            document.getElementById('final-score').innerText = score;
+            
+            const fb = document.getElementById('feedback-msg');
+            if(score === 100) fb.innerHTML = "<div class='text-center text-emerald-400 font-bold'>Sempurna! Susunan Gerhana Bulan-mu sangat akurat layaknya Ilmuwan Ahli!</div>";
+            else fb.innerHTML = "<span class='text-yellow-400 font-bold'>Catatan Peneliti:</span><br><br>" + feedback.join("<br><br>");
+            window.scrollTo(0,0);
+        }
+    </script>
+</body>
+</html>
